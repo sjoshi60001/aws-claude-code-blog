@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//workshop/claude-code-aws-blog/checkpoints/**)",
+      "Bash(chmod:*)",
+      "Bash(./restore-checkpoint.sh:*)",
+      "Bash(./create-checkpoint.sh:*)",
+      "Bash(npm install)",
+      "Bash(npm run dev)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -1,0 +1,303 @@
+---
+title: "Deploying MCP Servers on AWS ECS: Production Infrastructure Guide"
+date: "2026-06-09"
+author: "AWS Developer"
+excerpt: "Learn how to deploy and scale Model Context Protocol (MCP) servers on AWS ECS with best practices for containerization, service discovery, and high availability."
+category: "Infrastructure"
+tags: ["AWS", "ECS", "MCP", "Docker", "Infrastructure", "Containers", "Fargate"]
+published: true
+---
+
+# Deploying MCP Servers on AWS ECS: Production Infrastructure Guide
+
+Model Context Protocol (MCP) servers extend Claude Code's capabilities by providing custom tools and data sources. While MCP servers work great in local development, deploying them to production requires robust infrastructure. This guide shows you how to deploy MCP servers on AWS ECS for scalable, production-ready integrations.
+
+## Introduction
+
+The Model Context Protocol (MCP) is an open standard that allows AI applications like Claude Code to connect to external data sources and tools through standardized server implementations. Whether you're building custom database connectors, API integrations, or specialized tooling, running MCP servers on AWS Elastic Container Service (ECS) provides the scalability, reliability, and operational excellence needed for production workloads.
+
+AWS ECS is a fully managed container orchestration service that eliminates the need to manage your own cluster infrastructure. By deploying MCP servers on ECS with Fargate, you get automatic scaling, built-in service discovery, and seamless integration with other AWS services like Application Load Balancers, CloudWatch, and Secrets Manager.
+
+## Prerequisites
+
+Before you begin, make sure you have:
+
+- **AWS Account** with appropriate IAM permissions for ECS, ECR, VPC, and CloudWatch
+- **Docker** installed locally for building container images
+- **AWS CLI** version 2.x or later, configured with credentials
+- **Node.js or Python** environment for your MCP server implementation
+- **Existing MCP server code** that you want to deploy
+- **Basic understanding** of containers, networking, and AWS services
+- **VPC setup** with public and private subnets (or willingness to create one)
+
+## Step-by-Step Guide
+
+### Step 1: Containerize Your MCP Server
+
+First, create a Dockerfile for your MCP server. Here's an example for a Node.js-based MCP server:
+
+```dockerfile
+FROM node:20-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy application code
+COPY . .
+
+# Build if using TypeScript
+RUN npm run build
+
+# Expose MCP server port
+EXPOSE 3000
+
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node healthcheck.js || exit 1
+
+# Run the MCP server
+CMD ["node", "dist/index.js"]
+```
+
+For Python-based MCP servers:
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application
+COPY . .
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD python healthcheck.py || exit 1
+
+# Run server
+CMD ["python", "-m", "mcp_server"]
+```
+
+Build and test locally:
+
+```bash
+docker build -t mcp-server:local .
+docker run -p 3000:3000 mcp-server:local
+```
+
+### Step 2: Push Container to Amazon ECR
+
+Create an ECR repository and push your image:
+
+```bash
+# Create ECR repository
+aws ecr create-repository \
+    --repository-name mcp-server \
+    --region us-east-1
+
+# Get login credentials
+aws ecr get-login-password --region us-east-1 | \
+    docker login --username AWS --password-stdin \
+    123456789012.dkr.ecr.us-east-1.amazonaws.com
+
+# Tag your image
+docker tag mcp-server:local \
+    123456789012.dkr.ecr.us-east-1.amazonaws.com/mcp-server:latest
+
+# Push to ECR
+docker push 123456789012.dkr.ecr.us-east-1.amazonaws.com/mcp-server:latest
+```
+
+### Step 3: Create ECS Task Definition
+
+Create a task definition JSON file (`mcp-task-definition.json`):
+
+```json
+{
+  "family": "mcp-server",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::123456789012:role/mcpServerTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "mcp-server",
+      "image": "123456789012.dkr.ecr.us-east-1.amazonaws.com/mcp-server:latest",
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "essential": true,
+      "environment": [
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "PORT",
+          "value": "3000"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:mcp/database-url"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mcp-server",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "mcp"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
+```
+
+Register the task definition:
+
+```bash
+aws ecs register-task-definition \
+    --cli-input-json file://mcp-task-definition.json
+```
+
+### Step 4: Create ECS Service with Load Balancer
+
+Create an Application Load Balancer:
+
+```bash
+# Create target group
+aws elbv2 create-target-group \
+    --name mcp-server-tg \
+    --protocol HTTP \
+    --port 3000 \
+    --vpc-id vpc-12345678 \
+    --target-type ip \
+    --health-check-path /health \
+    --health-check-interval-seconds 30
+
+# Create load balancer
+aws elbv2 create-load-balancer \
+    --name mcp-server-alb \
+    --subnets subnet-12345678 subnet-87654321 \
+    --security-groups sg-12345678
+
+# Create listener
+aws elbv2 create-listener \
+    --load-balancer-arn <alb-arn> \
+    --protocol HTTP \
+    --port 80 \
+    --default-actions Type=forward,TargetGroupArn=<target-group-arn>
+```
+
+Create the ECS service:
+
+```bash
+aws ecs create-service \
+    --cluster mcp-cluster \
+    --service-name mcp-server \
+    --task-definition mcp-server:1 \
+    --desired-count 2 \
+    --launch-type FARGATE \
+    --platform-version LATEST \
+    --network-configuration "awsvpcConfiguration={
+        subnets=[subnet-12345678,subnet-87654321],
+        securityGroups=[sg-12345678],
+        assignPublicIp=ENABLED
+    }" \
+    --load-balancers "targetGroupArn=<target-group-arn>,containerName=mcp-server,containerPort=3000" \
+    --health-check-grace-period-seconds 60
+```
+
+### Step 5: Configure Auto Scaling
+
+Set up auto scaling based on CPU utilization:
+
+```bash
+# Register scalable target
+aws application-autoscaling register-scalable-target \
+    --service-namespace ecs \
+    --resource-id service/mcp-cluster/mcp-server \
+    --scalable-dimension ecs:service:DesiredCount \
+    --min-capacity 2 \
+    --max-capacity 10
+
+# Create scaling policy
+aws application-autoscaling put-scaling-policy \
+    --service-namespace ecs \
+    --resource-id service/mcp-cluster/mcp-server \
+    --scalable-dimension ecs:service:DesiredCount \
+    --policy-name mcp-cpu-scaling \
+    --policy-type TargetTrackingScaling \
+    --target-tracking-scaling-policy-configuration '{
+        "TargetValue": 70.0,
+        "PredefinedMetricSpecification": {
+            "PredefinedMetricType": "ECSServiceAverageCPUUtilization"
+        },
+        "ScaleOutCooldown": 60,
+        "ScaleInCooldown": 120
+    }'
+```
+
+## Best Practices
+
+When deploying MCP servers on ECS, keep these best practices in mind:
+
+- **Multi-AZ Deployment**: Deploy tasks across multiple availability zones for high availability. Use at least 2 subnets in different AZs for your ECS service
+- **Health Checks**: Implement robust health check endpoints that verify both application health and dependencies (database connections, external APIs). Set appropriate thresholds to avoid premature task termination
+- **Resource Limits**: Right-size CPU and memory based on load testing. Start conservative (512 CPU / 1GB RAM) and adjust based on CloudWatch metrics. Enable container insights for detailed monitoring
+- **Secrets Management**: Never hardcode credentials. Use AWS Secrets Manager or Parameter Store for sensitive configuration. Rotate secrets regularly and grant least-privilege IAM permissions
+- **Logging Strategy**: Send structured logs to CloudWatch Logs with appropriate retention policies. Include request IDs and correlation data for tracing. Consider log aggregation tools for multi-service deployments
+- **Container Optimization**: Use multi-stage Docker builds to minimize image size. Leverage layer caching and scan images for vulnerabilities with ECR scanning. Pin base image versions for reproducibility
+
+## Common Pitfalls
+
+Avoid these common mistakes:
+
+- **Insufficient Health Check Grace Period**: ECS will kill tasks that fail health checks during startup. Set `healthCheckGracePeriodSeconds` to at least 60s for Node.js apps, 120s for JVM apps
+- **Missing VPC Endpoints**: Pulling images from ECR without VPC endpoints routes traffic through NAT gateways, incurring data transfer costs. Create VPC endpoints for ECR, S3, and CloudWatch to keep traffic private
+- **Inadequate IAM Permissions**: The task execution role needs permissions for ECR (pull images) and Secrets Manager (read secrets). The task role needs permissions for whatever AWS services your MCP server calls
+- **Single AZ Deployment**: Deploying in one availability zone means downtime during AZ failures. Always use multiple subnets across AZs, even for dev environments
+- **No Connection Pooling**: Opening new database connections for every request exhausts connection limits. Implement connection pooling with appropriate timeout and max connection settings
+- **Ignoring Cold Start Time**: Fargate tasks take 30-60 seconds to start. Factor this into scaling policies and client timeout settings. Consider keeping minimum task count > 0 for latency-sensitive applications
+
+## Conclusion
+
+Deploying MCP servers on AWS ECS provides a production-grade platform for extending Claude Code with custom integrations. By containerizing your MCP server, using Fargate for serverless container orchestration, and implementing proper monitoring and scaling, you can build reliable infrastructure that grows with your needs.
+
+Start with a simple deployment to validate your setup, then gradually add features like auto scaling, multi-region deployment, and advanced monitoring as your requirements evolve. The combination of MCP's extensibility and ECS's operational excellence enables powerful AI integrations at scale.
+
+## Further Reading
+
+- [AWS ECS Documentation](https://docs.aws.amazon.com/ecs/)
+- [Model Context Protocol Specification](https://modelcontextprotocol.io/)
+- [ECS Best Practices Guide](https://docs.aws.amazon.com/AmazonECS/latest/bestpracticesguide/intro.html)
+- [AWS Fargate Pricing](https://aws.amazon.com/fargate/pricing/)
+- [Container Security Best Practices](https://aws.amazon.com/blogs/containers/top-10-security-best-practices-for-amazon-ecs/)
+- [MCP Server Examples](https://github.com/modelcontextprotocol/servers)

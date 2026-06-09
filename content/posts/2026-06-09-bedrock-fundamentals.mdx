@@ -1,0 +1,179 @@
+---
+title: "AWS Bedrock Fundamentals: A Comprehensive Guide"
+date: "2026-06-09"
+author: "AWS Developer"
+excerpt: "Master the foundational concepts of AWS Bedrock and learn how to build production-ready AI applications with Claude and other foundation models."
+category: "Bedrock"
+tags: ["AWS", "Bedrock", "AI", "Foundation Models", "Claude", "Getting Started"]
+published: true
+---
+
+# AWS Bedrock Fundamentals: A Comprehensive Guide
+
+AWS Bedrock provides a fully managed service for building and scaling generative AI applications using foundation models from leading AI companies. This guide will walk you through the fundamental concepts, architecture, and best practices for getting started with Bedrock.
+
+## Introduction
+
+Amazon Bedrock is a fully managed service that makes foundation models (FMs) from Amazon and leading AI startups available through a unified API. It enables developers to build and scale generative AI applications without managing infrastructure, while maintaining data privacy and security within your AWS environment.
+
+Bedrock supports multiple foundation models including Claude (Anthropic), Titan (Amazon), Stable Diffusion (Stability AI), and models from AI21 Labs, Cohere, and Meta. This flexibility allows you to choose the right model for your specific use case, from text generation and summarization to image creation and embeddings.
+
+## Prerequisites
+
+Before you begin, make sure you have:
+
+- **AWS Account** with appropriate IAM permissions for Bedrock
+- **AWS CLI** installed and configured (version 2.x or later)
+- **Boto3 SDK** (Python) or AWS SDK for your preferred language
+- **Model Access**: Request access to specific foundation models in the Bedrock console
+- **Basic understanding** of AWS services (IAM, CloudWatch, S3)
+- **Programming knowledge** in Python, JavaScript, or another supported language
+
+## Step-by-Step Guide
+
+### Step 1: Request Model Access
+
+Before using Bedrock, you must request access to the foundation models you want to use:
+
+1. Navigate to the Amazon Bedrock console
+2. Click "Model access" in the left navigation
+3. Select the models you need (e.g., Claude 3.5 Sonnet, Claude 3 Haiku)
+4. Click "Request model access"
+5. Wait for approval (usually instant for most models)
+
+```bash
+# Verify model access via CLI
+aws bedrock list-foundation-models --region us-east-1
+```
+
+### Step 2: Set Up IAM Permissions
+
+Create an IAM policy that grants access to Bedrock:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+        "bedrock:ListFoundationModels",
+        "bedrock:GetFoundationModel"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+Attach this policy to your IAM user, role, or service.
+
+### Step 3: Make Your First Bedrock API Call
+
+Here's a simple example using the Boto3 SDK to invoke Claude via Bedrock:
+
+```python
+import boto3
+import json
+
+# Initialize Bedrock client
+bedrock = boto3.client(
+    service_name='bedrock-runtime',
+    region_name='us-east-1'
+)
+
+# Prepare the request
+prompt = "Explain AWS Bedrock in simple terms."
+request_body = json.dumps({
+    "anthropic_version": "bedrock-2023-05-31",
+    "max_tokens": 1024,
+    "messages": [
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ]
+})
+
+# Invoke the model
+response = bedrock.invoke_model(
+    modelId='anthropic.claude-3-5-sonnet-20241022-v2:0',
+    body=request_body
+)
+
+# Parse the response
+response_body = json.loads(response['body'].read())
+print(response_body['content'][0]['text'])
+```
+
+### Step 4: Implement Streaming Responses
+
+For better user experience with long-form content, use streaming:
+
+```python
+response = bedrock.invoke_model_with_response_stream(
+    modelId='anthropic.claude-3-5-sonnet-20241022-v2:0',
+    body=request_body
+)
+
+# Process the stream
+for event in response['body']:
+    chunk = json.loads(event['chunk']['bytes'])
+    if chunk['type'] == 'content_block_delta':
+        print(chunk['delta']['text'], end='', flush=True)
+```
+
+### Step 5: Monitor Usage and Costs
+
+Set up CloudWatch monitoring and billing alerts:
+
+```bash
+# View Bedrock metrics
+aws cloudwatch get-metric-statistics \
+    --namespace AWS/Bedrock \
+    --metric-name ModelInvocations \
+    --dimensions Name=ModelId,Value=anthropic.claude-3-5-sonnet-20241022-v2:0 \
+    --start-time 2026-06-01T00:00:00Z \
+    --end-time 2026-06-09T23:59:59Z \
+    --period 3600 \
+    --statistics Sum
+```
+
+## Best Practices
+
+When working with AWS Bedrock, keep these best practices in mind:
+
+- **Model Selection**: Choose the right model for your task - use smaller models like Claude 3 Haiku for simple tasks and larger models like Claude 3.5 Sonnet for complex reasoning
+- **Prompt Engineering**: Invest time in crafting clear, specific prompts with examples and context. Well-designed prompts significantly improve output quality and reduce costs
+- **Error Handling**: Implement robust retry logic with exponential backoff for throttling errors (429) and transient failures
+- **Cost Optimization**: Use prompt caching for repeated context, batch requests when possible, and monitor token usage closely
+- **Security**: Never include sensitive data in prompts unless encrypted, use VPC endpoints for private connectivity, and implement proper IAM least-privilege policies
+- **Response Validation**: Always validate and sanitize model outputs before using them in production systems
+
+## Common Pitfalls
+
+Avoid these common mistakes:
+
+- **Ignoring Rate Limits**: Not implementing proper throttling and retry logic leads to failed requests. Use exponential backoff and respect the service quotas
+- **Hardcoding Model IDs**: Model IDs change with new versions. Use configuration files or environment variables to manage model selection
+- **Poor Token Management**: Forgetting that both input and output tokens count toward costs. Monitor usage with CloudWatch and set budget alerts
+- **Insufficient Testing**: Not testing with production-scale data before launch. Always validate model performance with representative workloads
+- **Missing Error Context**: Not logging request IDs and parameters makes debugging difficult. Include full context in error logs
+- **Neglecting Prompt Injection**: Failing to sanitize user input in prompts can lead to security vulnerabilities. Always validate and escape user-provided content
+
+## Conclusion
+
+AWS Bedrock provides a powerful, managed platform for building generative AI applications. By understanding the fundamentals—from model access and IAM permissions to API invocation and monitoring—you can build production-ready AI applications that scale efficiently and securely.
+
+Start with simple use cases, implement proper error handling and monitoring from day one, and gradually expand to more complex scenarios as you become comfortable with the service. The unified API makes it easy to experiment with different models and find the best fit for your needs.
+
+## Further Reading
+
+- [AWS Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
+- [Anthropic Claude on Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-claude.html)
+- [Bedrock Pricing](https://aws.amazon.com/bedrock/pricing/)
+- [Claude Code Documentation](https://code.anthropic.com/docs/)
+- [Bedrock Security Best Practices](https://docs.aws.amazon.com/bedrock/latest/userguide/security-best-practices.html)
+- [Foundation Model Comparison Guide](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html)

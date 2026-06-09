@@ -1,0 +1,33 @@
+{
+  "name": "claude-code-aws-blog",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AWS-themed blog built with Claude Code and Next.js 14",
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "next": "14.2.22",
+    "gray-matter": "^4.0.3",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "@types/node": "^20",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@tailwindcss/postcss": "^4",
+    "tailwindcss": "^4",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "14.2.22",
+    "prettier": "^3.3.3",
+    "prettier-plugin-tailwindcss": "^0.6.8"
+  }
+}
